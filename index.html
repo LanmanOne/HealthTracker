@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Log - Logan</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        :root { --primary-blue: #3b71f3; --border-color: #adb5bd; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #fff; margin: 0; padding: 15px; display: flex; justify-content: center; }
+        
+        #auth-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #fff; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999;
+        }
+
+        .container { width: 100%; max-width: 900px; display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 25px; }
+        
+        @media (max-width: 768px) { .container { grid-template-columns: 1fr; } }
+
+        /* --- ONE-PAGE PRINT ENGINE --- */
+        @media print {
+    @page { size: portrait; margin: 0.3in; }
+    body { padding: 0; background: white; zoom: 90%; }
+    
+    /* Hide non-essential UI */
+    .db-controls, .btn, .med-plus, #save-status, #file_upload, #auth-overlay { display: none !important; }
+    
+    /* Maintain 2-column layout */
+    .container { 
+        display: grid !important; 
+        grid-template-columns: 1.1fr 0.9fr !important; 
+        gap: 20px !important; 
+        width: 100% !important; 
+    }
+    
+    .section { page-break-inside: avoid; margin-bottom: 10px !important; }
+    
+    /* Style headers for print */
+    .header-bar { 
+        background-color: #f1f3f9 !important; 
+        color: #000 !important; 
+        border: 1px solid #ddd; 
+        padding: 4px !important; 
+        -webkit-print-color-adjust: exact; 
+    }
+
+    /* FIX TRUNCATED MEDICATIONS */
+    .med-row { 
+        grid-template-columns: 1fr 30px 80px !important; /* Adjusted for print without the "+" button */
+        gap: 5px !important;
+    }
+
+    .med-row input[type="text"] {
+        border: none !important;
+        background: transparent !important;
+        padding: 0 !important;
+        width: 100% !important; /* Allow full use of the column width */
+        font-size: 0.85rem !important;
+        color: black !important;
+        text-overflow: clip !important; /* Prevent "..." truncation */
+        overflow: visible !important;
+    }
+
+    /* Make checkboxes crisp */
+    input[type="checkbox"] {
+        transform: scale(1.2);
+        -webkit-print-color-adjust: exact;
+    }
+
+    /* Fix scale visibility */
+    .num-circle.selected { background-color: #3b71f3 !important; color: white !important; -webkit-print-color-adjust: exact; }
+    .segment.active { border: 2px solid #000 !important; }
+    .mood-word.selected { background-color: #d1e1ff !important; -webkit-print-color-adjust: exact; }
+    
+    textarea { border: 1px solid #eee !important; height: auto !important; min-height: 40px !important; }
+}
+
+        .db-controls { grid-column: 1 / -1; background: #f1f3f9; padding: 15px; border-radius: 15px; display: flex; flex-wrap: wrap; gap: 15px; align-items: center; border: 1px solid #ddd; }
+        .header-bar { background-color: var(--primary-blue); color: white; text-align: center; padding: 10px; border-radius: 15px; font-weight: bold; margin-bottom: 12px; }
+        .section { margin-bottom: 20px; }
+        .icon-box { display: flex; flex-direction: column; align-items: center; width: 75px; text-align: center; }
+        .sub-text { font-size: 0.75rem; font-weight: bold; margin-top: 4px; color: #444; }
+        .scale-wrap { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; }
+        .num-circle { width: 35px; height: 35px; line-height: 35px; border: 1px solid var(--border-color); border-radius: 50%; cursor: pointer; text-align: center; font-weight: bold; }
+        .num-circle.selected { background: var(--primary-blue); color: white; border-color: var(--primary-blue); }
+        .pill-input { border: 1px solid var(--border-color); border-radius: 20px; padding: 8px 15px; width: 100%; box-sizing: border-box; outline: none; }
+        .box-input { border: 1px solid var(--border-color); border-radius: 15px; padding: 15px; width: 100%; box-sizing: border-box; resize: none; }
+        
+        .input-group { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+        .label-text { font-size: 0.75rem; font-weight: bold; color: #555; padding-left: 10px; }
+
+        .anxiety-bar { display: flex; height: 28px; border-radius: 6px; overflow: hidden; border: 1px solid #777; }
+        .segment { flex: 1; cursor: pointer; }
+        .segment.active { border: 3px solid #000; box-sizing: border-box; }
+        .mood-container { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        .mood-column { border: 1px solid var(--border-color); border-radius: 12px; padding: 6px; background: #fafafa; }
+        .mood-word { cursor: pointer; padding: 4px 6px; border-radius: 5px; font-size: 0.8rem; display: block; }
+        .mood-word.selected { background: #d1e1ff; font-weight: bold; }
+        hr { border: 0; border-top: 1px solid #ddd; margin: 4px 0; }
+        .med-row { display: grid; grid-template-columns: 28px 1fr 40px 80px; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .med-plus { color: #ff4d4d; font-size: 1.1rem; font-weight: bold; border: 2px solid #ff4d4d; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
+        .btn { background: var(--primary-blue); color: white; border: none; padding: 10px 18px; border-radius: 20px; cursor: pointer; font-weight: bold; }
+        .status-pill { font-size: 0.8rem; padding: 6px 12px; border-radius: 12px; margin-left: auto; background: #eee; font-weight: bold; }
+
+
+    </style>
+</head>
+<body>
+
+<div id="auth-overlay">
+    <h2 style="color: var(--primary-blue);">Daily Log Locked</h2>
+    <input type="password" id="pass-input" class="pill-input" style="width: 280px; text-align: center; margin-bottom: 15px;" placeholder="Enter Project Password">
+    <button class="btn" onclick="unlockPage()">Unlock Log</button>
+</div>
+
+<div class="container" id="main-content" style="visibility: hidden;">
+    <div class="db-controls">
+        <label><strong>Log Date:</strong></label>
+        <input type="date" id="target_date" class="pill-input" style="width: auto;">
+        <button type="button" class="btn" style="background: #6c757d;" onclick="copyPreviousDay()">Duplicate Yesterday</button>
+        <button type="button" class="btn" style="background: #28a745;" onclick="window.print()">Print Log</button>
+        <span id="save-status" class="status-pill">Ready</span>
+    </div>
+
+    <form id="dailyForm" class="container" style="max-width: 100%; grid-column: 1 / -1;">
+        <div>
+            <div class="section">
+                <div class="header-bar">Sleep Quality</div>
+                <div class="scale-wrap">
+                    <div class="icon-box">
+                        <svg width="40" height="30" viewBox="0 0 50 40"><ellipse cx="25" cy="20" rx="18" ry="14" fill="#eee" stroke="#333" stroke-width="2"/><circle cx="25" cy="18" r="8" fill="#ddd" stroke="#333"/><path d="M21 15 L24 17 M29 15 L26 17" stroke="black" stroke-width="1.5"/><circle cx="22" cy="19" r="1" fill="black"/><circle cx="28" cy="19" r="1" fill="black"/><path d="M23 23 Q25 21 27 23" fill="none" stroke="black" stroke-width="1"/></svg>
+                        <span class="sub-text">Baaaad</span>
+                    </div>
+                    <div class="num-circle" data-group="sleep" onclick="uiSelect(this)">1</div>
+                    <div class="num-circle" data-group="sleep" onclick="uiSelect(this)">2</div>
+                    <div class="num-circle" data-group="sleep" onclick="uiSelect(this)">3</div>
+                    <div class="num-circle" data-group="sleep" onclick="uiSelect(this)">4</div>
+                    <div class="icon-box">
+                        <svg width="40" height="30" viewBox="0 0 50 40"><ellipse cx="25" cy="20" rx="18" ry="14" fill="#fff" stroke="#333" stroke-width="1.5"/><circle cx="25" cy="18" r="8" fill="#fff" stroke="#333"/><circle cx="22" cy="18" r="1" fill="black"/><circle cx="28" cy="18" r="1" fill="black"/><path d="M22 21 Q25 24 28 21" fill="none" stroke="black" stroke-width="1"/></svg>
+                        <span class="sub-text">Excellent</span>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 15px;">
+                    <div class="input-group"><label class="label-text">Hours Slept</label><input type="number" step="0.1" id="sleep_hours" class="pill-input"></div>
+                    <div class="input-group"><label class="label-text">Wakeup Time</label><input type="time" id="wakeup_time" class="pill-input"></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="header-bar">Food and Diet</div>
+                <textarea id="food_diet" class="box-input" rows="8"></textarea>
+            </div>
+
+            <div class="section">
+                <div class="header-bar">Exercise</div>
+                <textarea id="exercise_notes" class="box-input" rows="5"></textarea>
+                <div style="display: flex; align-items: center; gap: 10px; margin-top:10px;">
+                    <button type="button" class="pill-input" style="width: auto; background: white;">Gentle Yoga</button>
+                    <div class="input-group" style="width: 80px;"><label class="label-text">AM</label><input type="text" id="ex_am" class="pill-input"></div>
+                    <div class="input-group" style="width: 80px;"><label class="label-text">PM</label><input type="text" id="ex_pm" class="pill-input"></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="header-bar">Free Space</div>
+                <div class="box-input">
+                    <input type="file" id="file_upload" accept="image/*,application/pdf" style="margin-bottom: 8px;">
+                    <textarea id="free_space_text" style="width: 100%; border: none; outline: none;" rows="4"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="section">
+                <div class="header-bar">Energy</div>
+                <div class="scale-wrap">
+                    <div class="icon-box"><span class="sub-text">Low</span></div>
+                    <div class="num-circle" data-group="energy" onclick="uiSelect(this)">1</div>
+                    <div class="num-circle" data-group="energy" onclick="uiSelect(this)">2</div>
+                    <div class="num-circle" data-group="energy" onclick="uiSelect(this)">3</div>
+                    <div class="num-circle" data-group="energy" onclick="uiSelect(this)">4</div>
+                    <div class="icon-box"><span class="sub-text">High</span></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="header-bar">Anxiety</div>
+                <div class="anxiety-bar" id="anxiety-scale">
+                    <div class="segment" style="background:#8bc34a" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#cddc39" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#ffeb3b" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#fdd835" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#ffb300" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#fb8c00" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#f4511e" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#e53935" onclick="uiAnxiety(this)"></div>
+                    <div class="segment" style="background:#b71c1c" onclick="uiAnxiety(this)"></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="header-bar">Mood</div>
+                <div class="mood-container">
+                    <div class="mood-column">
+                        <span class="mood-word" onclick="uiMood(this)">calm</span><span class="mood-word" onclick="uiMood(this)">relaxed</span><span class="mood-word" onclick="uiMood(this)">peaceful</span><hr>
+                        <span class="mood-word" onclick="uiMood(this)">inspired</span><span class="mood-word" onclick="uiMood(this)">hopeful</span><span class="mood-word" onclick="uiMood(this)">passionate</span><hr>
+                        <span class="mood-word" onclick="uiMood(this)">excited</span><span class="mood-word" onclick="uiMood(this)">upbeat</span><span class="mood-word" onclick="uiMood(this)">cheerful</span>
+                    </div>
+                    <div class="mood-column">
+                        <span class="mood-word" onclick="uiMood(this)">grateful</span><span class="mood-word" onclick="uiMood(this)">valued</span><span class="mood-word" onclick="uiMood(this)">understood</span><hr>
+                        <span class="mood-word" onclick="uiMood(this)">creative</span><span class="mood-word" onclick="uiMood(this)">focused</span><span class="mood-word" onclick="uiMood(this)">motivated</span><hr>
+                        <span class="mood-word" onclick="uiMood(this)">worried</span><span class="mood-word" onclick="uiMood(this)">overwhelmed</span><span class="mood-word" onclick="uiMood(this)">threatened</span>
+                    </div>
+                    <div class="mood-column">
+                        <span class="mood-word" onclick="uiMood(this)">insignificant</span><span class="mood-word" onclick="uiMood(this)">powerless</span><span class="mood-word" onclick="uiMood(this)">vulnerable</span><hr>
+                        <span class="mood-word" onclick="uiMood(this)">disappointed</span><span class="mood-word" onclick="uiMood(this)">apathetic</span><span class="mood-word" onclick="uiMood(this)">empty</span><hr>
+                        <span class="mood-word" onclick="uiMood(this)">withdrawn</span><span class="mood-word" onclick="uiMood(this)">abandoned</span><span class="mood-word" onclick="uiMood(this)">isolated</span>
+                    </div>
+                </div>
+                <div style="margin-top:10px;">
+                    <label class="label-text">Other Custom Moods</label>
+                    <input type="text" id="custom_mood" class="pill-input" placeholder="Enter custom moods...">
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="header-bar">Daily Medication</div>
+                <div id="med-list">
+                    <div class="med-row"><div class="med-plus">+</div><input type="text" class="pill-input"><input type="checkbox"><input type="text" class="pill-input"></div>
+                    <div class="med-row"><div class="med-plus">+</div><input type="text" class="pill-input"><input type="checkbox"><input type="text" class="pill-input"></div>
+                    <div class="med-row"><div class="med-plus">+</div><input type="text" class="pill-input"><input type="checkbox"><input type="text" class="pill-input"></div>
+                    <div class="med-row"><div class="med-plus">+</div><input type="text" class="pill-input"><input type="checkbox"><input type="text" class="pill-input"></div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+    let globalPassword = "";
+    const SB_URL = 'https://jzlefoklyspjmaehcqrh.supabase.co';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6bGVmb2tseXNwam1hZWhjcXJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwODU2MzcsImV4cCI6MjA4NTY2MTYzN30.rtr3z6T093_ui8rHnx5XVcRlhG53dUDX3CkdjpXZ-xk';
+    let supabaseClient;
+
+    function unlockPage() {
+        globalPassword = document.getElementById('pass-input').value;
+        if(!globalPassword) return alert("Password required.");
+        supabaseClient = supabase.createClient(SB_URL, SB_KEY, { global: { headers: { 'x-project-password': globalPassword } } });
+        document.getElementById('auth-overlay').style.display = 'none';
+        document.getElementById('main-content').style.visibility = 'visible';
+        const now = new Date();
+        const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0'), d = String(now.getDate()).padStart(2, '0');
+        document.getElementById('target_date').value = `${y}-${m}-${d}`;
+        loadSelectedDate();
+    }
+
+    function uiSelect(el) { el.parentElement.querySelectorAll('.num-circle').forEach(c => c.classList.remove('selected')); el.classList.add('selected'); saveToSupabase(); }
+    function uiAnxiety(el) { el.parentElement.querySelectorAll('.segment').forEach(s => s.classList.remove('active')); el.classList.add('active'); saveToSupabase(); }
+    function uiMood(el) { el.classList.toggle('selected'); saveToSupabase(); }
+
+    function clearForm() {
+        document.getElementById('dailyForm').reset();
+        document.querySelectorAll('.num-circle, .segment, .mood-word').forEach(el => el.classList.remove('selected', 'active'));
+    }
+
+    async function saveToSupabase() {
+        const date = document.getElementById('target_date').value;
+        if(!date || !supabaseClient) return;
+        
+        const payload = {
+            log_date: date,
+            sleep_quality: parseInt(document.querySelector('.num-circle.selected[data-group="sleep"]')?.innerText || 0),
+            sleep_hours: document.getElementById('sleep_hours').value === "" ? null : parseFloat(document.getElementById('sleep_hours').value),
+            wakeup_time: document.getElementById('wakeup_time').value === "" ? null : document.getElementById('wakeup_time').value,
+            food_diet: document.getElementById('food_diet').value,
+            exercise_notes: document.getElementById('exercise_notes').value,
+            energy_level: parseInt(document.querySelector('.num-circle.selected[data-group="energy"]')?.innerText || 0),
+            anxiety_level: Array.from(document.querySelectorAll('#anxiety-scale .segment')).indexOf(document.querySelector('.segment.active')),
+            moods: Array.from(document.querySelectorAll('.mood-word.selected')).map(m => m.innerText),
+            custom_mood: document.getElementById('custom_mood').value,
+            free_space: document.getElementById('free_space_text').value,
+            medications: Array.from(document.querySelectorAll('.med-row')).map(row => {
+                const textInputs = row.querySelectorAll('input[type="text"]');
+                return {
+                    name: textInputs[0].value,
+                    taken: row.querySelector('input[type="checkbox"]').checked,
+                    dosage: textInputs[1].value
+                };
+            })
+        };
+
+        const { error } = await supabaseClient.from('daily_logs').upsert(payload, { onConflict: 'log_date' });
+        const status = document.getElementById('save-status');
+        if (error) { status.innerText = "Error"; status.style.background="#f8d7da"; console.error(error); }
+        else { status.innerText = "Saved"; status.style.background="#d4edda"; }
+    }
+
+    function populateUI(data) {
+        document.getElementById('sleep_hours').value = data.sleep_hours || '';
+        document.getElementById('wakeup_time').value = data.wakeup_time || '';
+        document.getElementById('food_diet').value = data.food_diet || '';
+        document.getElementById('exercise_notes').value = data.exercise_notes || '';
+        document.getElementById('custom_mood').value = data.custom_mood || '';
+        document.getElementById('free_space_text').value = data.free_space || '';
+        
+        document.querySelectorAll('.num-circle, .segment, .mood-word').forEach(el => el.classList.remove('selected', 'active'));
+        if(data.sleep_quality > 0) document.querySelectorAll('[data-group="sleep"]')[data.sleep_quality-1].classList.add('selected');
+        if(data.energy_level > 0) document.querySelectorAll('[data-group="energy"]')[data.energy_level-1].classList.add('selected');
+        if(data.anxiety_level >= 0) document.querySelectorAll('#anxiety-scale .segment')[data.anxiety_level].classList.add('active');
+        (data.moods || []).forEach(m => { document.querySelectorAll('.mood-word').forEach(w => { if(w.innerText === m) w.classList.add('selected'); }); });
+
+        // --- MEDICATION LOADING LOGIC ---
+        const savedMeds = data.medications || [];
+        const rows = document.querySelectorAll('.med-row');
+        rows.forEach((row, i) => {
+            const textInputs = row.querySelectorAll('input[type="text"]');
+            const med = savedMeds[i] || { name: '', taken: false, dosage: '' };
+            textInputs[0].value = med.name || '';
+            row.querySelector('input[type="checkbox"]').checked = med.taken || false;
+            textInputs[1].value = med.dosage || '';
+        });
+    }
+
+    async function loadSelectedDate() {
+        const { data } = await supabaseClient.from('daily_logs').select('*').eq('log_date', document.getElementById('target_date').value).maybeSingle();
+        if (data) populateUI(data); else clearForm();
+    }
+
+    async function copyPreviousDay() {
+        const d = new Date(document.getElementById('target_date').value); d.setDate(d.getDate()-1);
+        const { data } = await supabaseClient.from('daily_logs').select('*').eq('log_date', d.toISOString().split('T')[0]).maybeSingle();
+        if (data) { 
+            // When duplicating, we clear the 'taken' status for the new day
+            if (data.medications) data.medications.forEach(m => m.taken = false);
+            populateUI(data); 
+            saveToSupabase(); 
+        }
+    }
+
+    document.getElementById('target_date').addEventListener('change', loadSelectedDate);
+    document.getElementById('dailyForm').addEventListener('input', () => { clearTimeout(window.saveT); window.saveT = setTimeout(saveToSupabase, 1000); });
+</script>
+
+</body>
+</html>

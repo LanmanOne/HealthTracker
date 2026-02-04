@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zero-Knowledge Encrypted Notepad</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root { --primary: #3ecf8e; --bg: #121212; --card: #1e1e1e; --text: #e1e1e1; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 20px; }
+        .container { background: var(--card); padding: 2rem; border-radius: 12px; width: 100%; max-width: 600px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h2 { color: var(--primary); margin-top: 0; }
+        input, textarea { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #333; border-radius: 6px; background: #2a2a2a; color: white; box-sizing: border-box; }
+        textarea { height: 250px; font-family: monospace; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        button { cursor: pointer; padding: 12px; border: none; border-radius: 6px; font-weight: bold; transition: 0.2s; }
+        .btn-save { background: var(--primary); color: #000; }
+        .btn-load { background: #444; color: white; }
+        button:active { transform: scale(0.98); }
+        #status { margin-top: 15px; padding: 10px; border-radius: 4px; display: none; font-size: 0.9rem; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Secure Notepad</h2>
+    <input type="password" id="password" placeholder="Master Password (never sent to server)" autocomplete="off">
+    <textarea id="noteContent" placeholder="Enter your secret notes..."></textarea>
+    
+    <div class="actions">
+        <button class="btn-save" id="saveBtn">Encrypt & Save</button>
+        <button class="btn-load" id="loadBtn">Decrypt & Load</button>
+    </div>
+
+    <input type="file" id="attachment" accept="image/*,application/pdf" style="margin-top:20px; font-size: 0.8rem; color: #888;">
+    
+    <div id="status"></div>
+</div>
+
+<script>
+    // 1. SETTINGS - Replace these with your actual Supabase Project details
+    const SB_URL = 'https://jzlefoklyspjmaehcqrh.supabase.co';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6bGVmb2tseXNwam1hZWhjcXJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwODU2MzcsImV4cCI6MjA4NTY2MTYzN30.rtr3z6T093_ui8rHnx5XVcRlhG53dUDX3CkdjpXZ-xk';
+
+    // 2. INITIALIZE (Renamed to avoid 'supabase' conflict)
+    const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
+
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    function showStatus(msg, isError = false) {
+        const s = document.getElementById('status');
+        s.innerText = msg;
+        s.style.display = 'block';
+        s.style.background = isError ? 'rgba(255,0,0,0.2)' : 'rgba(62,207,142,0.2)';
+        s.style.color = isError ? '#ff8080' : '#3ecf8e';
+        setTimeout(() => s.style.display = 'none', 5000);
+    }
+
+    // PBKDF2 Key Derivation
+    async function getEncryptionKey(password, salt) {
+        const baseKey = await window.crypto.subtle.importKey(
+            "raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]
+        );
+        return window.crypto.subtle.deriveKey(
+            { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
+            baseKey,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"]
+        );
+    }
+
+    // Save Logic
+    async function handleSave() {
+        const password = document.getElementById('password').value;
+        const content = document.getElementById('noteContent').value;
+        
+        if (!password || !content) {
+            return showStatus("Both password and note content are required!", true);
+        }
+
+        try {
+            const salt = window.crypto.getRandomValues(new Uint8Array(16));
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const key = await getEncryptionKey(password, salt);
+
+            const encryptedBuffer = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv }, key, enc.encode(content)
+            );
+
+            // Payload conversion to Base64 for storage
+            const payload = {
+                content: btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer))),
+                salt: btoa(String.fromCharCode(...salt)),
+                iv: btoa(String.fromCharCode(...iv))
+            };
+
+            const { error } = await supabaseClient.from('notes').insert([payload]);
+            if (error) throw error;
+            showStatus("Note encrypted and saved to Supabase!");
+        } catch (err) {
+            console.error(err);
+            showStatus("Save error: " + err.message, true);
+        }
+    }
+
+    // Load Logic
+    async function handleLoad() {
+        const password = document.getElementById('password').value;
+        if (!password) return showStatus("You must enter the password to decrypt!", true);
+
+        try {
+            // Gets the most recently created note
+            const { data, error } = await supabaseClient
+                .from('notes')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+
+            if (error || !data) throw new Error("No notes found in the database.");
+
+            // Convert Base64 back to Uint8Arrays
+            const salt = Uint8Array.from(atob(data.salt), c => c.charCodeAt(0));
+            const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
+            const encryptedData = Uint8Array.from(atob(data.content), c => c.charCodeAt(0));
+
+            const key = await getEncryptionKey(password, salt);
+            
+            const decryptedBuffer = await window.crypto.subtle.decrypt(
+                { name: "AES-GCM", iv }, key, encryptedData
+            );
+
+            document.getElementById('noteContent').value = dec.decode(decryptedBuffer);
+            showStatus("Decryption successful.");
+        } catch (err) {
+            console.error(err);
+            showStatus("Decryption failed. Check your password.", true);
+        }
+    }
+
+    // Attach Listeners
+    document.getElementById('saveBtn').addEventListener('click', handleSave);
+    document.getElementById('loadBtn').addEventListener('click', handleLoad);
+
+</script>
+</body>
+</html>

@@ -3,61 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zero-Knowledge Encrypted Notepad</title>
+    <title>Zero-Knowledge History Notepad</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        :root { --primary: #3ecf8e; --bg: #121212; --card: #1e1e1e; --text: #e1e1e1; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 20px; }
-        .container { background: var(--card); padding: 2rem; border-radius: 12px; width: 100%; max-width: 600px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        h2 { color: var(--primary); margin-top: 0; }
-        input, textarea { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #333; border-radius: 6px; background: #2a2a2a; color: white; box-sizing: border-box; }
-        textarea { height: 250px; font-family: monospace; }
-        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        button { cursor: pointer; padding: 12px; border: none; border-radius: 6px; font-weight: bold; transition: 0.2s; }
+        :root { --primary: #3ecf8e; --bg: #0f0f0f; --card: #1a1a1a; --text: #ececec; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 20px; }
+        .container { background: var(--card); padding: 2rem; border-radius: 12px; width: 100%; max-width: 650px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); border: 1px solid #333; }
+        h2 { color: var(--primary); margin: 0 0 1rem 0; font-weight: 300; letter-spacing: 1px; }
+        
+        input, textarea, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #333; border-radius: 6px; background: #262626; color: white; box-sizing: border-box; font-size: 1rem; }
+        textarea { height: 300px; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.5; }
+        
+        .history-section { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid var(--primary); }
+        .history-controls { display: flex; gap: 10px; align-items: center; }
+        label { font-size: 0.85rem; color: #aaa; display: block; margin-bottom: 5px; }
+
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+        button { cursor: pointer; padding: 12px; border: none; border-radius: 6px; font-weight: bold; transition: all 0.2s; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; }
         .btn-save { background: var(--primary); color: #000; }
         .btn-load { background: #444; color: white; }
-        button:active { transform: scale(0.98); }
-        #status { margin-top: 15px; padding: 10px; border-radius: 4px; display: none; font-size: 0.9rem; text-align: center; }
+        .btn-refresh { background: transparent; border: 1px solid #555; color: #ccc; padding: 8px; width: auto; }
+        button:hover { filter: brightness(1.2); }
+        button:active { transform: translateY(1px); }
+
+        #status { margin-top: 15px; padding: 12px; border-radius: 6px; display: none; text-align: center; font-weight: bold; }
+        .file-info { font-size: 0.75rem; color: #666; margin-top: 20px; font-style: italic; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Secure Notepad</h2>
-    <input type="password" id="password" placeholder="Master Password (never sent to server)" autocomplete="off">
-    <textarea id="noteContent" placeholder="Enter your secret notes..."></textarea>
+    <h2>Secure Vault Notepad</h2>
     
-    <div class="actions">
-        <button class="btn-save" id="saveBtn">Encrypt & Save</button>
-        <button class="btn-load" id="loadBtn">Decrypt & Load</button>
+    <input type="password" id="password" placeholder="Master Password (never leaves your browser)" autocomplete="off">
+    
+    <div class="history-section">
+        <label>Stored Versions (Append-Only):</label>
+        <div class="history-controls">
+            <select id="historySelect">
+                <option value="">-- Load Most Recent --</option>
+            </select>
+            <button class="btn-refresh" id="refreshHistory">Refresh List</button>
+        </div>
     </div>
 
-    <input type="file" id="attachment" accept="image/*,application/pdf" style="margin-top:20px; font-size: 0.8rem; color: #888;">
+    <textarea id="noteContent" placeholder="Write your encrypted notes here..."></textarea>
+    
+    <div class="actions">
+        <button class="btn-save" id="saveBtn">Encrypt & Save New Version</button>
+        <button class="btn-load" id="loadBtn">Decrypt Selected</button>
+    </div>
+
+    <div class="file-info">
+        Note: File input accepts image/*,application/pdf (per preferences).
+        <input type="file" id="attachment" accept="image/*,application/pdf" style="display: block; margin-top: 5px;">
+    </div>
     
     <div id="status"></div>
 </div>
 
 <script>
-    // 1. SETTINGS - Replace these with your actual Supabase Project details
+    // 1. CONFIGURATION - Replace with your project details
     const SB_URL = 'https://jzlefoklyspjmaehcqrh.supabase.co';
     const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6bGVmb2tseXNwam1hZWhjcXJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwODU2MzcsImV4cCI6MjA4NTY2MTYzN30.rtr3z6T093_ui8rHnx5XVcRlhG53dUDX3CkdjpXZ-xk';
 
-    // 2. INITIALIZE (Renamed to avoid 'supabase' conflict)
-    const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
 
+    // 2. INITIALIZE SUPABASE
+    const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
+    // UI Helper
     function showStatus(msg, isError = false) {
         const s = document.getElementById('status');
         s.innerText = msg;
         s.style.display = 'block';
-        s.style.background = isError ? 'rgba(255,0,0,0.2)' : 'rgba(62,207,142,0.2)';
-        s.style.color = isError ? '#ff8080' : '#3ecf8e';
+        s.style.background = isError ? 'rgba(255, 70, 70, 0.2)' : 'rgba(62, 207, 142, 0.2)';
+        s.style.color = isError ? '#ff7070' : '#3ecf8e';
         setTimeout(() => s.style.display = 'none', 5000);
     }
 
-    // PBKDF2 Key Derivation
+    // PBKDF2: Turns your password into a cryptographically strong 256-bit key
     async function getEncryptionKey(password, salt) {
         const baseKey = await window.crypto.subtle.importKey(
             "raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]
@@ -71,13 +97,38 @@
         );
     }
 
-    // Save Logic
+    // Load History list from Supabase
+    async function refreshHistory() {
+        try {
+            const { data, error } = await supabaseClient
+                .from('notes')
+                .select('id, created_at')
+                .order('created_at', { ascending: false })
+                .limit(15);
+
+            if (error) throw error;
+
+            const select = document.getElementById('historySelect');
+            select.innerHTML = '<option value="">-- Load Most Recent --</option>';
+            data.forEach(item => {
+                const date = new Date(item.created_at).toLocaleString();
+                const option = document.createElement('option');
+                option.value = item.id;
+                option.textContent = date;
+                select.appendChild(option);
+            });
+        } catch (err) {
+            console.error("History error:", err);
+        }
+    }
+
+    // Encryption & Storage
     async function handleSave() {
         const password = document.getElementById('password').value;
         const content = document.getElementById('noteContent').value;
         
         if (!password || !content) {
-            return showStatus("Both password and note content are required!", true);
+            return showStatus("Password and content are both required!", true);
         }
 
         try {
@@ -89,7 +140,6 @@
                 { name: "AES-GCM", iv }, key, enc.encode(content)
             );
 
-            // Payload conversion to Base64 for storage
             const payload = {
                 content: btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer))),
                 salt: btoa(String.fromCharCode(...salt)),
@@ -98,30 +148,34 @@
 
             const { error } = await supabaseClient.from('notes').insert([payload]);
             if (error) throw error;
-            showStatus("Note encrypted and saved to Supabase!");
+
+            showStatus("Version saved successfully!");
+            refreshHistory();
         } catch (err) {
-            console.error(err);
             showStatus("Save error: " + err.message, true);
         }
     }
 
-    // Load Logic
+    // Fetch & Decryption
     async function handleLoad() {
         const password = document.getElementById('password').value;
-        if (!password) return showStatus("You must enter the password to decrypt!", true);
+        const selectedId = document.getElementById('historySelect').value;
+        
+        if (!password) return showStatus("Enter your encryption password!", true);
 
         try {
-            // Gets the most recently created note
-            const { data, error } = await supabaseClient
-                .from('notes')
-                .select('*')
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .single();
+            let query = supabaseClient.from('notes').select('*');
+            
+            if (selectedId) {
+                query = query.eq('id', selectedId);
+            } else {
+                query = query.order('created_at', { ascending: false }).limit(1);
+            }
 
-            if (error || !data) throw new Error("No notes found in the database.");
+            const { data, error } = await query.single();
+            if (error || !data) throw new Error("Could not find the note version.");
 
-            // Convert Base64 back to Uint8Arrays
+            // Convert Base64 back to byte arrays
             const salt = Uint8Array.from(atob(data.salt), c => c.charCodeAt(0));
             const iv = Uint8Array.from(atob(data.iv), c => c.charCodeAt(0));
             const encryptedData = Uint8Array.from(atob(data.content), c => c.charCodeAt(0));
@@ -133,17 +187,20 @@
             );
 
             document.getElementById('noteContent').value = dec.decode(decryptedBuffer);
-            showStatus("Decryption successful.");
+            showStatus("Decryption successful!");
         } catch (err) {
             console.error(err);
-            showStatus("Decryption failed. Check your password.", true);
+            showStatus("Decryption failed. Wrong password or corrupted data.", true);
         }
     }
 
-    // Attach Listeners
+    // Event Listeners
     document.getElementById('saveBtn').addEventListener('click', handleSave);
     document.getElementById('loadBtn').addEventListener('click', handleLoad);
+    document.getElementById('refreshHistory').addEventListener('click', refreshHistory);
 
+    // Initial fetch of versions on page load
+    refreshHistory();
 </script>
 </body>
 </html>
